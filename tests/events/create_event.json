@@ -1,0 +1,8 @@
+{
+  "httpMethod": "POST",
+  "path": "/create",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": "{\"url\": \"https://example.com/long-url-to-shorten\"}"
+}
