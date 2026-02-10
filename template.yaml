@@ -7,13 +7,38 @@ Globals:
     Runtime: python3.12
     Timeout: 10
     MemorySize: 256
-    Handler: app.handler
 
 Resources:
+  # 카운터 테이블 추가
+  SurlCounterTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      TableName: SurlCounter
+      PrimaryKey:
+        Name: counter_name
+        Type: String
+  # DynamoDB 테이블 추가
+  SurlMappingTable:
+    Type: AWS::Serverless::SimpleTable # 간단한 PK 구조일 때 사용
+    Properties:
+      PrimaryKey:
+        Name: shortCode
+        Type: String
+  # 공통 모듈(common/base62) 포함을 위해 CodeUri: src/, Handler만 분리
   CreateFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: src/create/
+      CodeUri: src/
+      Handler: create.app.handler
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref SurlMappingTable
+          COUNTER_TABLE_NAME: !Ref SurlCounterTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SurlMappingTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SurlCounterTable
       Events:
         CreateApi:
           Type: Api
@@ -24,7 +49,14 @@ Resources:
   RedirectFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: src/redirect/
+      CodeUri: src/
+      Handler: redirect.app.handler
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref SurlMappingTable
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref SurlMappingTable
       Events:
         RedirectApi:
           Type: Api
