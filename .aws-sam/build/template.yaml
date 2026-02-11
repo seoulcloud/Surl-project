@@ -1,0 +1,86 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: "Surl - \uC11C\uBC84\uB9AC\uC2A4 URL \uB2E8\uCD95 \uC11C\uBE44\uC2A4"
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 10
+    MemorySize: 256
+Resources:
+  SurlCounterTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      TableName: SurlCounter
+      PrimaryKey:
+        Name: counter_name
+        Type: String
+  SurlMappingTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      PrimaryKey:
+        Name: shortCode
+        Type: String
+  CreateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: CreateFunction
+      Handler: create.app.handler
+      Environment:
+        Variables:
+          TABLE_NAME:
+            Ref: SurlMappingTable
+          COUNTER_TABLE_NAME:
+            Ref: SurlCounterTable
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: SurlMappingTable
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: SurlCounterTable
+      Events:
+        CreateApi:
+          Type: Api
+          Properties:
+            Path: /create
+            Method: post
+    Metadata:
+      SamResourceId: CreateFunction
+  RedirectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: RedirectFunction
+      Handler: redirect.app.handler
+      Environment:
+        Variables:
+          TABLE_NAME:
+            Ref: SurlMappingTable
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: SurlMappingTable
+      Events:
+        RedirectApi:
+          Type: Api
+          Properties:
+            Path: /{shortCode}
+            Method: get
+    Metadata:
+      SamResourceId: RedirectFunction
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value:
+      Fn::Sub: https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/
+  CreateFunctionArn:
+    Description: Create Lambda ARN
+    Value:
+      Fn::GetAtt:
+      - CreateFunction
+      - Arn
+  RedirectFunctionArn:
+    Description: Redirect Lambda ARN
+    Value:
+      Fn::GetAtt:
+      - RedirectFunction
+      - Arn
