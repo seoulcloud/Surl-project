@@ -4,7 +4,7 @@ Description: "Surl - \uC11C\uBC84\uB9AC\uC2A4 URL \uB2E8\uCD95 \uC11C\uBE44\uC2A
 Globals:
   Function:
     Runtime: python3.12
-    Timeout: 10
+    Timeout: 20
     MemorySize: 256
 Resources:
   SurlCounterTable:
@@ -38,6 +38,10 @@ Resources:
       - DynamoDBCrudPolicy:
           TableName:
             Ref: SurlCounterTable
+      - Statement:
+        - Effect: Allow
+          Action: bedrock:InvokeModel
+          Resource: arn:aws:bedrock:ap-northeast-2::foundation-model/anthropic.claude-3-haiku-20240307-v1:0
       Events:
         CreateApi:
           Type: Api

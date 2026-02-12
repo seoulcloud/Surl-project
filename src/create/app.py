@@ -10,20 +10,22 @@ BEDROCK = boto3.client("bedrock-runtime", region_name="ap-northeast-2")
 
 def _get_ai_analysis(url: str) -> dict:
     """Bedrock(Claude 3 Haiku)을 사용하여 URL 분석"""
+    # 프롬프트를 조금 더 명확하게 수정
     prompt = f"""
-    Human: 다음 URL의 성격을 분석해서 JSON 형식으로만 응답해줘.
+    다음 URL의 성격을 분석해서 JSON 형식으로 응답해줘.
     URL: {url}
-    조건:
-    1. category: (IT, 쇼핑, 맛집, 금융, 기타 중 택1)
-    2. summary: (한 줄 요약)
-    
-    Assistant: {{"category":"""
+    결과는 반드시 다음 키를 포함하는 JSON 형태여야 해:
+    - category: (IT, 쇼핑, 맛집, 금융, 기타 중 택1)
+    - summary: (한 줄 요약)
+    """
 
     body = json.dumps({
         "anthropic_version": "bedrock-2023-05-31",
         "max_tokens": 300,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.5,
+        "messages": [
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.1, # 일관성을 위해 온도를 낮춤
     })
 
     try:
@@ -32,11 +34,23 @@ def _get_ai_analysis(url: str) -> dict:
             body=body
         )
         response_body = json.loads(response.get("body").read())
-        # 응답 텍스트 파싱 및 JSON 보정
-        result_text = '{"category":' + response_body['content'][0]['text']
-        return json.loads(result_text)
+        raw_text = response_body['content'][0]['text'].strip()
+        
+        # [수정] AI가 보낸 텍스트에서 JSON 부분만 추출하거나 그대로 로드
+        # 만약 AI가 텍스트를 섞어 보냈을 경우를 대비해 간단히 정제
+        if not raw_text.startswith('{'):
+            # 텍스트 내에서 { } 구간을 찾는 로직 (방어적 코드)
+            start = raw_text.find('{')
+            end = raw_text.rfind('}') + 1
+            raw_text = raw_text[start:end]
+            
+        return json.loads(raw_text)
+        
     except Exception as e:
         print(f"AI Analysis Error: {e}")
+        # 에러 시 로깅용으로 원본 텍스트 출력 (디버깅용)
+        try: print(f"Raw AI Output: {raw_text}")
+        except: pass
         return {"category": "기타", "summary": "분석 실패"}
 
 # --- 공통 모듈 설정 ---
