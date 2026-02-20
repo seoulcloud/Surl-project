@@ -1,6 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: "Surl - \uC11C\uBC84\uB9AC\uC2A4 URL \uB2E8\uCD95 \uC11C\uBE44\uC2A4"
+Description: "Surl - AI \uD2B8\uB80C\uB4DC \uB9AC\uD3EC\uD2B8 \uAC00\uC2DC\uC131\uC774\
+  \ \uAC1C\uC120\uB41C \uBAA8\uB2C8\uD130\uB9C1 \uB300\uC2DC\uBCF4\uB4DC"
 Globals:
   Function:
     Runtime: python3.12
@@ -20,6 +21,20 @@ Resources:
       PrimaryKey:
         Name: shortCode
         Type: String
+  SurlClickLogsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: shortCode
+        AttributeType: S
+      - AttributeName: timestamp
+        AttributeType: S
+      KeySchema:
+      - AttributeName: shortCode
+        KeyType: HASH
+      - AttributeName: timestamp
+        KeyType: RANGE
   CreateFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -59,10 +74,22 @@ Resources:
         Variables:
           TABLE_NAME:
             Ref: SurlMappingTable
+          LOG_TABLE_NAME:
+            Ref: SurlClickLogsTable
       Policies:
       - DynamoDBReadPolicy:
           TableName:
             Ref: SurlMappingTable
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: SurlClickLogsTable
+      - Statement:
+        - Effect: Allow
+          Action:
+          - logs:CreateLogGroup
+          - logs:CreateLogStream
+          - logs:PutLogEvents
+          Resource: '*'
       Events:
         RedirectApi:
           Type: Api
@@ -71,20 +98,101 @@ Resources:
             Method: get
     Metadata:
       SamResourceId: RedirectFunction
+  TrendFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: TrendFunction
+      Handler: trend.app.handler
+      Environment:
+        Variables:
+          LOG_TABLE_NAME:
+            Ref: SurlClickLogsTable
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: SurlClickLogsTable
+      - Statement:
+        - Effect: Allow
+          Action: bedrock:InvokeModel
+          Resource: arn:aws:bedrock:ap-northeast-2::foundation-model/anthropic.claude-3-haiku-20240307-v1:0
+      Events:
+        TrendApi:
+          Type: Api
+          Properties:
+            Path: /trend
+            Method: get
+    Metadata:
+      SamResourceId: TrendFunction
+  SurlOperationDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: Surl-Advanced-Operation-Dashboard
+      DashboardBody:
+        Fn::Sub: "{\n  \"widgets\": [\n    {\n      \"type\": \"metric\", \"x\": 0,\
+          \ \"y\": 0, \"width\": 12, \"height\": 6,\n      \"properties\": {\n   \
+          \     \"title\": \"Traffic Overview (\uD2B8\uB798\uD53D \uD604\uD669)\"\
+          ,\n        \"metrics\": [\n          [ \"AWS/Lambda\", \"Invocations\",\
+          \ \"FunctionName\", \"${CreateFunction}\", { \"label\": \"\uC0DD\uC131(Create)\"\
+          \ } ],\n          [ \"...\", \"Invocations\", \"FunctionName\", \"${RedirectFunction}\"\
+          , { \"label\": \"\uB9AC\uB2E4\uC774\uB809\uD2B8(Redirect)\" } ],\n     \
+          \     [ \"...\", \"Invocations\", \"FunctionName\", \"${TrendFunction}\"\
+          , { \"label\": \"AI\uBD84\uC11D(Trend)\" } ]\n        ],\n        \"view\"\
+          : \"timeSeries\", \"stacked\": false, \"region\": \"${AWS::Region}\"\n \
+          \     }\n    },\n    {\n      \"type\": \"metric\", \"x\": 12, \"y\": 0,\
+          \ \"width\": 12, \"height\": 6,\n      \"properties\": {\n        \"title\"\
+          : \"Performance: Latency (p90)\",\n        \"metrics\": [\n          [ \"\
+          AWS/Lambda\", \"Duration\", \"FunctionName\", \"${CreateFunction}\", { \"\
+          stat\": \"p90\" } ],\n          [ \"...\", \"Duration\", \"FunctionName\"\
+          , \"${RedirectFunction}\", { \"stat\": \"p90\" } ],\n          [ \"...\"\
+          , \"Duration\", \"FunctionName\", \"${TrendFunction}\", { \"stat\": \"p90\"\
+          \ } ]\n        ],\n        \"view\": \"timeSeries\", \"region\": \"${AWS::Region}\"\
+          \n      }\n    },\n    {\n      \"type\": \"log\", \"x\": 0, \"y\": 6, \"\
+          width\": 24, \"height\": 8,\n      \"properties\": {\n        \"title\"\
+          : \"AI Trend Analysis Report (AI \uD2B8\uB80C\uB4DC \uBD84\uC11D \uB9AC\uD3EC\
+          \uD2B8)\",\n        \"region\": \"${AWS::Region}\",\n        \"query\":\
+          \ \"SOURCE '/aws/lambda/${TrendFunction}' | filter @message like /\uBD84\
+          \uC11D \uACB0\uACFC:/ | parse @message \\\"\uBD84\uC11D \uACB0\uACFC: *1.\
+          \ *2. *3. *\\\" as ignore, PopularField, Reason, Summary | display @timestamp,\
+          \ PopularField as \\\"\uC778\uAE30\uBD84\uC57C\\\", Reason as \\\"\uCD94\
+          \uCE21\uC0AC\uC720\\\", Summary as \\\"\uD55C\uC904\uC694\uC57D\\\" | sort\
+          \ @timestamp desc | limit 5\",\n        \"view\": \"table\"\n      }\n \
+          \   },\n    {\n      \"type\": \"metric\", \"x\": 0, \"y\": 14, \"width\"\
+          : 12, \"height\": 6,\n      \"properties\": {\n        \"title\": \"Error\
+          \ Rates\",\n        \"metrics\": [\n          [ \"AWS/Lambda\", \"Errors\"\
+          , \"FunctionName\", \"${CreateFunction}\" ],\n          [ \"...\", \"Errors\"\
+          , \"FunctionName\", \"${RedirectFunction}\" ],\n          [ \"...\", \"\
+          Errors\", \"FunctionName\", \"${TrendFunction}\" ]\n        ],\n       \
+          \ \"view\": \"timeSeries\", \"region\": \"${AWS::Region}\", \"stat\": \"\
+          Sum\"\n      }\n    },\n    {\n      \"type\": \"metric\", \"x\": 12, \"\
+          y\": 14, \"width\": 12, \"height\": 6,\n      \"properties\": {\n      \
+          \  \"title\": \"DynamoDB Capacity Units\",\n        \"metrics\": [\n   \
+          \       [ \"AWS/DynamoDB\", \"ConsumedWriteCapacityUnits\", \"TableName\"\
+          , \"${SurlClickLogsTable}\" ],\n          [ \"...\", \"ConsumedReadCapacityUnits\"\
+          , \"TableName\", \"${SurlClickLogsTable}\" ]\n        ],\n        \"view\"\
+          : \"timeSeries\", \"region\": \"${AWS::Region}\"\n      }\n    }\n  ]\n\
+          }\n"
+  CreateLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${CreateFunction}
+      RetentionInDays: 7
+  RedirectLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${RedirectFunction}
+      RetentionInDays: 7
+  TrendLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${TrendFunction}
+      RetentionInDays: 7
 Outputs:
   ApiEndpoint:
-    Description: API Gateway endpoint URL
     Value:
       Fn::Sub: https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/
-  CreateFunctionArn:
-    Description: Create Lambda ARN
+  DashboardConsoleUrl:
     Value:
-      Fn::GetAtt:
-      - CreateFunction
-      - Arn
-  RedirectFunctionArn:
-    Description: Redirect Lambda ARN
-    Value:
-      Fn::GetAtt:
-      - RedirectFunction
-      - Arn
+      Fn::Sub: https://console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=Surl-Advanced-Operation-Dashboard

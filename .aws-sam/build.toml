@@ -7,6 +7,6 @@ architecture = "x86_64"
 handler = "create.app.handler"
 manifest_hash = ""
 packagetype = "Zip"
-functions = ["CreateFunction", "RedirectFunction"]
+functions = ["CreateFunction", "RedirectFunction", "TrendFunction"]
 
 [layer_build_definitions]

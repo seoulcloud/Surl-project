@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Surl - 서버리스 URL 단축 서비스
+Description: Surl - AI 트렌드 리포트 가시성이 개선된 모니터링 대시보드
 
 Globals:
   Function:
@@ -9,7 +9,7 @@ Globals:
     MemorySize: 256
 
 Resources:
-  # 카운터 테이블 추가
+  # 1. DynamoDB Tables
   SurlCounterTable:
     Type: AWS::Serverless::SimpleTable
     Properties:
@@ -17,14 +17,14 @@ Resources:
       PrimaryKey:
         Name: counter_name
         Type: String
-  # DynamoDB 테이블 추가
+
   SurlMappingTable:
-    Type: AWS::Serverless::SimpleTable # 간단한 PK 구조일 때 사용
+    Type: AWS::Serverless::SimpleTable
     Properties:
       PrimaryKey:
         Name: shortCode
         Type: String
-  # 클릭 로그 테이블 (트렌드 분석용) - 개별 Row 저장, 400KB 제한 회피
+
   SurlClickLogsTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -39,7 +39,8 @@ Resources:
           KeyType: HASH
         - AttributeName: timestamp
           KeyType: RANGE
-  # 공통 모듈(common/base62) 포함을 위해 CodeUri: src/, Handler만 분리
+
+  # 2. Lambda Functions
   CreateFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -50,20 +51,16 @@ Resources:
           TABLE_NAME: !Ref SurlMappingTable
           COUNTER_TABLE_NAME: !Ref SurlCounterTable
       Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Ref SurlMappingTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref SurlCounterTable
+        - DynamoDBCrudPolicy: { TableName: !Ref SurlMappingTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref SurlCounterTable }
         - Statement:
-          - Effect: Allow
-            Action: "bedrock:InvokeModel"
-            Resource: "arn:aws:bedrock:ap-northeast-2::foundation-model/anthropic.claude-3-haiku-20240307-v1:0"
+            - Effect: Allow
+              Action: "bedrock:InvokeModel"
+              Resource: "arn:aws:bedrock:ap-northeast-2::foundation-model/anthropic.claude-3-haiku-20240307-v1:0"
       Events:
         CreateApi:
           Type: Api
-          Properties:
-            Path: /create
-            Method: post
+          Properties: { Path: /create, Method: post }
 
   RedirectFunction:
     Type: AWS::Serverless::Function
@@ -75,24 +72,126 @@ Resources:
           TABLE_NAME: !Ref SurlMappingTable
           LOG_TABLE_NAME: !Ref SurlClickLogsTable
       Policies:
-        - DynamoDBReadPolicy:
-            TableName: !Ref SurlMappingTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref SurlClickLogsTable
+        - DynamoDBReadPolicy: { TableName: !Ref SurlMappingTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref SurlClickLogsTable }
+        - Statement:
+            - Effect: Allow
+              Action: [ "logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents" ]
+              Resource: "*"
       Events:
         RedirectApi:
           Type: Api
           Properties:
-            Path: /{shortCode}
+            Path: "/{shortCode}"
             Method: get
+
+  TrendFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: trend.app.handler
+      Environment:
+        Variables:
+          LOG_TABLE_NAME: !Ref SurlClickLogsTable
+      Policies:
+        - DynamoDBReadPolicy: { TableName: !Ref SurlClickLogsTable }
+        - Statement:
+            - Effect: Allow
+              Action: "bedrock:InvokeModel"
+              Resource: "arn:aws:bedrock:ap-northeast-2::foundation-model/anthropic.claude-3-haiku-20240307-v1:0"
+      Events:
+        TrendApi:
+          Type: Api
+          Properties:
+            Path: /trend
+            Method: get
+
+  # 3. CloudWatch Monitoring Dashboard
+  SurlOperationDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: Surl-Advanced-Operation-Dashboard
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric", "x": 0, "y": 0, "width": 12, "height": 6,
+              "properties": {
+                "title": "Traffic Overview (트래픽 현황)",
+                "metrics": [
+                  [ "AWS/Lambda", "Invocations", "FunctionName", "${CreateFunction}", { "label": "생성(Create)" } ],
+                  [ "...", "Invocations", "FunctionName", "${RedirectFunction}", { "label": "리다이렉트(Redirect)" } ],
+                  [ "...", "Invocations", "FunctionName", "${TrendFunction}", { "label": "AI분석(Trend)" } ]
+                ],
+                "view": "timeSeries", "stacked": false, "region": "${AWS::Region}"
+              }
+            },
+            {
+              "type": "metric", "x": 12, "y": 0, "width": 12, "height": 6,
+              "properties": {
+                "title": "Performance: Latency (p90)",
+                "metrics": [
+                  [ "AWS/Lambda", "Duration", "FunctionName", "${CreateFunction}", { "stat": "p90" } ],
+                  [ "...", "Duration", "FunctionName", "${RedirectFunction}", { "stat": "p90" } ],
+                  [ "...", "Duration", "FunctionName", "${TrendFunction}", { "stat": "p90" } ]
+                ],
+                "view": "timeSeries", "region": "${AWS::Region}"
+              }
+            },
+            {
+              "type": "log", "x": 0, "y": 6, "width": 24, "height": 8,
+              "properties": {
+                "title": "AI Trend Analysis Report (AI 트렌드 분석 리포트)",
+                "region": "${AWS::Region}",
+                "query": "SOURCE '/aws/lambda/${TrendFunction}' | filter @message like /분석 결과:/ | parse @message \"분석 결과: *1. *2. *3. *\" as ignore, PopularField, Reason, Summary | display @timestamp, PopularField as \"인기분야\", Reason as \"추측사유\", Summary as \"한줄요약\" | sort @timestamp desc | limit 5",
+                "view": "table"
+              }
+            },
+            {
+              "type": "metric", "x": 0, "y": 14, "width": 12, "height": 6,
+              "properties": {
+                "title": "Error Rates",
+                "metrics": [
+                  [ "AWS/Lambda", "Errors", "FunctionName", "${CreateFunction}" ],
+                  [ "...", "Errors", "FunctionName", "${RedirectFunction}" ],
+                  [ "...", "Errors", "FunctionName", "${TrendFunction}" ]
+                ],
+                "view": "timeSeries", "region": "${AWS::Region}", "stat": "Sum"
+              }
+            },
+            {
+              "type": "metric", "x": 12, "y": 14, "width": 12, "height": 6,
+              "properties": {
+                "title": "DynamoDB Capacity Units",
+                "metrics": [
+                  [ "AWS/DynamoDB", "ConsumedWriteCapacityUnits", "TableName", "${SurlClickLogsTable}" ],
+                  [ "...", "ConsumedReadCapacityUnits", "TableName", "${SurlClickLogsTable}" ]
+                ],
+                "view": "timeSeries", "region": "${AWS::Region}"
+              }
+            }
+          ]
+        }
+
+  # 4. CloudWatch Logs Retention (7 Days)
+  CreateLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${CreateFunction}"
+      RetentionInDays: 7
+  RedirectLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${RedirectFunction}"
+      RetentionInDays: 7
+  TrendLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${TrendFunction}"
+      RetentionInDays: 7
 
 Outputs:
   ApiEndpoint:
-    Description: API Gateway endpoint URL
     Value: !Sub 'https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/'
-  CreateFunctionArn:
-    Description: Create Lambda ARN
-    Value: !GetAtt CreateFunction.Arn
-  RedirectFunctionArn:
-    Description: Redirect Lambda ARN
-    Value: !GetAtt RedirectFunction.Arn
+  DashboardConsoleUrl:
+    Value: !Sub "https://console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=Surl-Advanced-Operation-Dashboard"
