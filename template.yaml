@@ -9,21 +9,16 @@ Globals:
     MemorySize: 256
 
 Resources:
-  # 1. DynamoDB Tables
   SurlCounterTable:
     Type: AWS::Serverless::SimpleTable
     Properties:
       TableName: SurlCounter
-      PrimaryKey:
-        Name: counter_name
-        Type: String
+      PrimaryKey: { Name: counter_name, Type: String }
 
   SurlMappingTable:
     Type: AWS::Serverless::SimpleTable
     Properties:
-      PrimaryKey:
-        Name: shortCode
-        Type: String
+      PrimaryKey: { Name: shortCode, Type: String }
 
   SurlClickLogsTable:
     Type: AWS::DynamoDB::Table
@@ -40,7 +35,6 @@ Resources:
         - AttributeName: timestamp
           KeyType: RANGE
 
-  # 2. Lambda Functions
   CreateFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -81,9 +75,7 @@ Resources:
       Events:
         RedirectApi:
           Type: Api
-          Properties:
-            Path: "/{shortCode}"
-            Method: get
+          Properties: { Path: "/{shortCode}", Method: get }
 
   TrendFunction:
     Type: AWS::Serverless::Function
@@ -102,11 +94,8 @@ Resources:
       Events:
         TrendApi:
           Type: Api
-          Properties:
-            Path: /trend
-            Method: get
+          Properties: { Path: /trend, Method: get }
 
-  # 3. CloudWatch Monitoring Dashboard
   SurlOperationDashboard:
     Type: AWS::CloudWatch::Dashboard
     Properties:
@@ -117,19 +106,19 @@ Resources:
             {
               "type": "metric", "x": 0, "y": 0, "width": 12, "height": 6,
               "properties": {
-                "title": "Traffic Overview (트래픽 현황)",
+                "title": "Traffic Overview",
                 "metrics": [
-                  [ "AWS/Lambda", "Invocations", "FunctionName", "${CreateFunction}", { "label": "생성(Create)" } ],
-                  [ "...", "Invocations", "FunctionName", "${RedirectFunction}", { "label": "리다이렉트(Redirect)" } ],
-                  [ "...", "Invocations", "FunctionName", "${TrendFunction}", { "label": "AI분석(Trend)" } ]
+                  [ "AWS/Lambda", "Invocations", "FunctionName", "${CreateFunction}", { "label": "Create" } ],
+                  [ "...", "Invocations", "FunctionName", "${RedirectFunction}", { "label": "Redirect" } ],
+                  [ "...", "Invocations", "FunctionName", "${TrendFunction}", { "label": "Trend" } ]
                 ],
-                "view": "timeSeries", "stacked": false, "region": "${AWS::Region}"
+                "view": "timeSeries", "region": "${AWS::Region}"
               }
             },
             {
               "type": "metric", "x": 12, "y": 0, "width": 12, "height": 6,
               "properties": {
-                "title": "Performance: Latency (p90)",
+                "title": "Performance: Latency",
                 "metrics": [
                   [ "AWS/Lambda", "Duration", "FunctionName", "${CreateFunction}", { "stat": "p90" } ],
                   [ "...", "Duration", "FunctionName", "${RedirectFunction}", { "stat": "p90" } ],
@@ -143,37 +132,13 @@ Resources:
               "properties": {
                 "title": "AI Trend Analysis Report (AI 트렌드 분석 리포트)",
                 "region": "${AWS::Region}",
-                "query": "SOURCE '/aws/lambda/${TrendFunction}' | filter @message like /분석 결과:/ | parse @message \"분석 결과: *1. *2. *3. *\" as ignore, PopularField, Reason, Summary | display @timestamp, PopularField as \"인기분야\", Reason as \"추측사유\", Summary as \"한줄요약\" | sort @timestamp desc | limit 5",
+                "query": "SOURCE '/aws/lambda/${TrendFunction}' | filter @message like /REPORT_DATA:/ | parse @message \"REPORT_DATA: [*] * [*] * [*] *\" as fieldTag, popular, reasonTag, reason, summaryTag, summary | display @timestamp, popular as `인기분야`, reason as `클릭사유`, summary as `한줄요약` | sort @timestamp desc | limit 5",
                 "view": "table"
-              }
-            },
-            {
-              "type": "metric", "x": 0, "y": 14, "width": 12, "height": 6,
-              "properties": {
-                "title": "Error Rates",
-                "metrics": [
-                  [ "AWS/Lambda", "Errors", "FunctionName", "${CreateFunction}" ],
-                  [ "...", "Errors", "FunctionName", "${RedirectFunction}" ],
-                  [ "...", "Errors", "FunctionName", "${TrendFunction}" ]
-                ],
-                "view": "timeSeries", "region": "${AWS::Region}", "stat": "Sum"
-              }
-            },
-            {
-              "type": "metric", "x": 12, "y": 14, "width": 12, "height": 6,
-              "properties": {
-                "title": "DynamoDB Capacity Units",
-                "metrics": [
-                  [ "AWS/DynamoDB", "ConsumedWriteCapacityUnits", "TableName", "${SurlClickLogsTable}" ],
-                  [ "...", "ConsumedReadCapacityUnits", "TableName", "${SurlClickLogsTable}" ]
-                ],
-                "view": "timeSeries", "region": "${AWS::Region}"
               }
             }
           ]
         }
 
-  # 4. CloudWatch Logs Retention (7 Days)
   CreateLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -193,5 +158,3 @@ Resources:
 Outputs:
   ApiEndpoint:
     Value: !Sub 'https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/'
-  DashboardConsoleUrl:
-    Value: !Sub "https://console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=Surl-Advanced-Operation-Dashboard"

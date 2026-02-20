@@ -1,6 +1,6 @@
 """
 트렌드 분석 람다
-GET /trend -> SurlClickLogsTable 최근 24시간(기본) 데이터 수집 후 Bedrock AI로 리포트 생성
+AI 분석 결과를 대시보드 파싱에 최적화된 형식으로 출력하도록 수정
 """
 
 import json
@@ -15,7 +15,6 @@ _BEDROCK = boto3.client("bedrock-runtime", region_name="ap-northeast-2")
 
 
 class DecimalEncoder(json.JSONEncoder):
-    """DynamoDB 응답의 Decimal 타입을 JSON 직렬화 가능한 타입으로 변환."""
     def default(self, obj):
         if isinstance(obj, Decimal):
             return int(obj) if obj % 1 == 0 else float(obj)
@@ -34,7 +33,6 @@ def _get_log_table():
 
 
 def _fetch_recent_clicks(minutes: int = 1440) -> list:
-    """최근 N분 클릭 로그 조회 (기본 24시간)."""
     try:
         table = _get_log_table()
         if not table:
@@ -71,21 +69,18 @@ def _aggregate_by_category(items: list) -> dict:
 
 
 def _ask_ai_trend(stats: dict, minutes: int = 1440) -> str:
-    """Bedrock(Claude)에게 트렌드 분석 요청."""
+    """Bedrock에게 엄격한 형식으로 답변 요청."""
     try:
-        # 시간 단위 변환 (분 -> 시간)
         hours = minutes // 60
         time_desc = f"{hours}시간" if hours > 0 else f"{minutes}분"
         
+        # AI에게 구분자(|)를 사용한 한 줄 형식을 강제함
         prompt = f"""
-다음은 지난 {time_desc} 동안 우리 서비스에서 발생한 URL 클릭 카테고리 통계 데이터야:
+다음은 지난 {time_desc} 동안의 URL 클릭 통계 데이터야:
 {json.dumps(stats, ensure_ascii=False)}
 
-이 데이터를 바탕으로 현재 사용자들의 관심 트렌드를 분석해서
-1. 가장 인기 있는 분야
-2. 클릭 사유 추측
-3. 한 줄 요약
-을 작성해줘.
+위 데이터를 분석해서 반드시 아래의 형식을 엄격히 지켜서 한 줄로 답변해줘. 다른 말은 하지마.
+형식: [분야] 인기있는분야내용 [사유] 클릭사유추측내용 [요약] 전체트렌드한줄요약
 """
         body = json.dumps({
             "anthropic_version": "bedrock-2023-05-31",
@@ -97,7 +92,7 @@ def _ask_ai_trend(stats: dict, minutes: int = 1440) -> str:
             body=body,
         )
         parsed = json.loads(resp.get("body").read())
-        text = parsed["content"][0]["text"].strip()
+        text = parsed["content"][0]["text"].strip().replace("\n", " ")
         return text
     except Exception as e:
         print(f"DEBUG _ask_ai_trend error: {e}")
@@ -114,44 +109,28 @@ def _response(status_code: int, body_obj: dict) -> dict:
 
 def handler(event, context):
     try:
-        # 1. 최근 24시간(기본) 클릭 로그 조회
         query = event.get("queryStringParameters") or {}
         try:
-            # 쿼리 파라미터가 없으면 기본값 1440(24시간) 사용
             minutes = int(query.get("minutes", 1440))
         except (TypeError, ValueError):
             minutes = 1440
         
-        # 최소 1분 ~ 최대 7일(10080분) 제한
         minutes = max(1, min(10080, minutes))
-
         items = _fetch_recent_clicks(minutes=minutes)
 
         if not items:
-            return _response(200, {
-                "message": f"최근 {minutes}분 동안의 데이터가 없습니다.",
-                "stats": {},
-                "ai_analysis": None,
-            })
+            return _response(200, {"message": "데이터 없음", "stats": {}, "ai_analysis": None})
 
-        # 2. 카테고리 통계
         stats = _aggregate_by_category(items)
 
-        # 3. AI 분석
         try:
             ai_analysis = _ask_ai_trend(stats, minutes=minutes)
-            
-            # [핵심] 대시보드 위젯용 로그 출력
-            # 이 형식을 지켜야 CloudWatch Dashboard의 Log 위젯에 표시됩니다.
-            print(f"분석 결과: {ai_analysis}")
-            
+            # 대시보드 파싱용 로그 출력 (구분자 포함)
+            print(f"REPORT_DATA: {ai_analysis}")
         except Exception as e:
-            ai_analysis = f"(AI 분석 실패: {e})"
+            ai_analysis = f"AI Error: {e}"
 
-        return _response(200, {
-            "stats": stats,
-            "ai_analysis": ai_analysis,
-        })
+        return _response(200, {"stats": stats, "ai_analysis": ai_analysis})
 
     except Exception as e:
         print(f"DEBUG handler error: {e}")
