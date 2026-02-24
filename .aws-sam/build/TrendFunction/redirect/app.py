@@ -15,23 +15,21 @@ def _get_table(env_name):
     return _DYNAMO.Table(table_name)
 
 def _save_click_log(short_code: str, category: str, event: dict) -> None:
-    """클릭 로그 저장 로직 (상세 디버깅 포함)"""
+    """클릭 로그 저장 로직"""
     try:
+        # 템플릿의 변수명 LOG_TABLE_NAME 사용
         log_table = _get_table("LOG_TABLE_NAME")
         if log_table is None:
             return
 
-        # REST API 구조에서 IP 및 컨텍스트 추출
+        # IP 추출
         request_context = event.get("requestContext", {})
         identity = request_context.get("identity", {})
         ip = identity.get("sourceIp", "unknown")
         
         timestamp = datetime.now(timezone.utc).isoformat()
         
-        print(f"DEBUG START: Attempting to save log to {log_table.table_name}")
-        print(f"DEBUG DATA: shortCode={short_code}, timestamp={timestamp}, category={category}, ip={ip}")
-
-        # DynamoDB 저장 실행
+        # DynamoDB 저장
         log_table.put_item(
             Item={
                 "shortCode": short_code,
@@ -40,16 +38,18 @@ def _save_click_log(short_code: str, category: str, event: dict) -> None:
                 "ip": ip,
             }
         )
-        print("DEBUG SUCCESS: Log saved to DynamoDB successfully.")
+        print(f"DEBUG SUCCESS: Log saved for {short_code}")
 
     except Exception as e:
-        # 에러 발생 시 상세 내용을 CloudWatch에 기록
-        print(f"DEBUG CRITICAL ERROR in _save_click_log: {str(e)}")
+        print(f"DEBUG ERROR in _save_click_log: {str(e)}")
 
 def _response(status_code: int, body: dict) -> dict:
     return {
         "statusCode": status_code,
-        "headers": {"Content-Type": "application/json"},
+        "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*"
+        },
         "body": json.dumps(body),
     }
 
@@ -58,7 +58,7 @@ def _redirect_response(location: str) -> dict:
         "statusCode": 302,
         "headers": {
             "Location": location,
-            "Cache-Control": "no-cache", # 매번 클릭이 기록되도록 캐시 방지
+            "Cache-Control": "no-cache",
         },
         "body": "",
     }
@@ -73,10 +73,10 @@ def handler(event, context):
         if not short_code:
             return _response(400, {"error": "shortCode is required"})
 
-        # 2. 매핑 테이블 조회
-        mapping_table = _get_table("TABLE_NAME")
+        # 2. 매핑 테이블 조회 (환경변수명 MAPPING_TABLE_NAME으로 수정)
+        mapping_table = _get_table("MAPPING_TABLE_NAME")
         if not mapping_table:
-            return _response(500, {"error": "Server configuration error (TABLE_NAME)"})
+            return _response(500, {"error": "Server configuration error"})
 
         resp = mapping_table.get_item(Key={"shortCode": short_code})
         item = resp.get("Item")
@@ -84,10 +84,14 @@ def handler(event, context):
         if not item:
             return _response(404, {"error": "URL not found"})
 
-        original_url = item.get("original_url")
+        # [중요] create/app.py의 저장 필드명과 일치시킴
+        original_url = item.get("originalUrl") 
         category = item.get("category", "기타")
 
-        # 3. 로그 저장 (비동기 효과를 위해 에러 격리)
+        if not original_url:
+            return _response(404, {"error": "Original URL missing in record"})
+
+        # 3. 로그 저장
         _save_click_log(short_code, category, event)
 
         # 4. 리다이렉트 응답
@@ -95,4 +99,4 @@ def handler(event, context):
 
     except Exception as e:
         print(f"DEBUG HANDLER ERROR: {str(e)}")
-        return _response(500, {"error": "Internal Server Error"})
+        return _response(500, {"error": "Internal Server Error", "details": str(e)})

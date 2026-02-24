@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Surl - 리소스 시각화 및 게이지 위젯이 포함된 통합 대시보드
+Description: Surl - AI 분석 및 게이지 대시보드 통합 시스템
 
 Globals:
   Function:
@@ -24,7 +24,6 @@ Resources:
   SurlClickLogsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: SurlClickLogs
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: shortCode
@@ -43,6 +42,10 @@ Resources:
     Properties:
       CodeUri: src/
       Handler: create.app.handler
+      Environment:
+        Variables:
+          MAPPING_TABLE_NAME: !Ref SurlMappingTable
+          COUNTER_TABLE_NAME: !Ref SurlCounterTable
       Events:
         CreateApi:
           Type: Api
@@ -62,6 +65,10 @@ Resources:
     Properties:
       CodeUri: src/
       Handler: redirect.app.handler
+      Environment:
+        Variables:
+          MAPPING_TABLE_NAME: !Ref SurlMappingTable
+          LOG_TABLE_NAME: !Ref SurlClickLogsTable
       Events:
         RedirectApi:
           Type: Api
@@ -77,6 +84,9 @@ Resources:
     Properties:
       CodeUri: src/
       Handler: trend.app.handler
+      Environment:
+        Variables:
+          LOG_TABLE_NAME: !Ref SurlClickLogsTable
       Events:
         TrendApi:
           Type: Api
@@ -95,7 +105,7 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: Surl-High-Error-Rate
-      AlarmDescription: "1분 내 에러 3회 이상 발생"
+      AlarmDescription: "1분 내 에러 3회 이상 발생 시 알람"
       MetricName: Errors
       Namespace: AWS/Lambda
       Statistic: Sum
@@ -116,39 +126,41 @@ Resources:
             {
               "type": "alarm", "x": 0, "y": 0, "width": 24, "height": 3,
               "properties": {
-                "title": "Emergency Alarms (긴급 알람)",
+                "title": "Emergency Alarms",
                 "alarms": ["arn:aws:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:Surl-High-Error-Rate"]
               }
             },
             {
               "type": "metric", "x": 0, "y": 3, "width": 8, "height": 6,
               "properties": {
-                "title": "Total Traffic (실시간 호출수)",
+                "title": "Traffic Gauge (Daily Cumulative)",
                 "metrics": [
-                  [ "AWS/Lambda", "Invocations", "FunctionName", "${RedirectFunction}", { "label": "Redirect", "color": "#ff7f0e" } ],
-                  [ "...", "Invocations", "FunctionName", "${CreateFunction}", { "label": "Create", "color": "#1f77b4" } ]
+                  [ "AWS/Lambda", "Invocations", "FunctionName", "${RedirectFunction}", { "label": "Redirect", "color": "#ff7f0e", "stat": "Sum" } ],
+                  [ "...", "Invocations", "FunctionName", "${CreateFunction}", { "label": "Create", "color": "#1f77b4", "stat": "Sum" } ]
                 ],
                 "view": "gauge",
                 "region": "${AWS::Region}",
+                "stat": "Sum",
+                "period": 60,
+                "start": "-P1D",
                 "yAxis": { "left": { "min": 0, "max": 100 } }
               }
             },
             {
               "type": "log", "x": 8, "y": 3, "width": 16, "height": 6,
               "properties": {
-                "title": "AI Trend Analytics (AI 트렌드 분석 리포트)",
+                "title": "AI Trend Analysis",
                 "region": "${AWS::Region}",
-                "query": "SOURCE '/aws/lambda/${TrendFunction}' | filter @message like /REPORT_DATA:/ | parse @message \"REPORT_DATA: [분야] * [사유] * [요약] *\" as popular, reason, summary | display @timestamp, popular as `분야`, reason as `사유`, summary as `분석요약` | sort @timestamp desc | limit 5",
+                "query": "SOURCE '/aws/lambda/${TrendFunction}' | filter @message like /REPORT_DATA:/ | parse @message \"REPORT_DATA: [분야] * [사유] * [요약] *\" as popular, reason, summary | display @timestamp, popular, reason, summary | sort @timestamp desc | limit 5",
                 "view": "table"
               }
             },
             {
               "type": "metric", "x": 0, "y": 9, "width": 12, "height": 6,
               "properties": {
-                "title": "Lambda Latency (지연 시간 - p90)",
+                "title": "Latency p90",
                 "metrics": [
-                  [ "AWS/Lambda", "Duration", "FunctionName", "${TrendFunction}", { "stat": "p90", "label": "Trend(AI)" } ],
-                  [ "...", "Duration", "FunctionName", "${RedirectFunction}", { "stat": "p90", "label": "Redirect" } ]
+                  [ "AWS/Lambda", "Duration", "FunctionName", "${TrendFunction}", { "stat": "p90" } ]
                 ],
                 "view": "timeSeries", "region": "${AWS::Region}"
               }
@@ -156,10 +168,9 @@ Resources:
             {
               "type": "metric", "x": 12, "y": 9, "width": 12, "height": 6,
               "properties": {
-                "title": "DynamoDB Health (DB 소모량)",
+                "title": "DB Usage",
                 "metrics": [
-                  [ "AWS/DynamoDB", "ConsumedReadCapacityUnits", "TableName", "SurlClickLogs", { "label": "Read" } ],
-                  [ "...", "ConsumedWriteCapacityUnits", "TableName", "SurlClickLogs", { "label": "Write" } ]
+                  [ "AWS/DynamoDB", "ConsumedReadCapacityUnits", "TableName", "${SurlClickLogsTable}" ]
                 ],
                 "view": "timeSeries", "region": "${AWS::Region}"
               }
@@ -169,5 +180,5 @@ Resources:
 
 Outputs:
   ApiEndpoint:
-    Description: "API Gateway Endpoint"
+    Description: "API 주소"
     Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
