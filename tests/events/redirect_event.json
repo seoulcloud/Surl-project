@@ -1,0 +1,7 @@
+{
+  "httpMethod": "GET",
+  "path": "/abc123",
+  "pathParameters": {
+    "shortCode": "abc123"
+  }
+}

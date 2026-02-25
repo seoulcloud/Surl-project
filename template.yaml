@@ -1,0 +1,184 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Surl - AI 분석 및 게이지 대시보드 통합 시스템
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 20
+    MemorySize: 256
+
+Resources:
+  # [1] DynamoDB Tables
+  SurlCounterTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      TableName: SurlCounter
+      PrimaryKey: { Name: counter_name, Type: String }
+
+  SurlMappingTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      PrimaryKey: { Name: shortCode, Type: String }
+
+  SurlClickLogsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: shortCode
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: shortCode
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+
+  # [2] Lambda Functions
+  CreateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: create.app.handler
+      Environment:
+        Variables:
+          MAPPING_TABLE_NAME: !Ref SurlMappingTable
+          COUNTER_TABLE_NAME: !Ref SurlCounterTable
+      Events:
+        CreateApi:
+          Type: Api
+          Properties:
+            Path: /create
+            Method: post
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref SurlMappingTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref SurlCounterTable }
+        - Statement:
+            - Effect: Allow
+              Action: "bedrock:InvokeModel"
+              Resource: "arn:aws:bedrock:ap-northeast-2::foundation-model/anthropic.claude-3-haiku-20240307-v1:0"
+
+  RedirectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: redirect.app.handler
+      Environment:
+        Variables:
+          MAPPING_TABLE_NAME: !Ref SurlMappingTable
+          LOG_TABLE_NAME: !Ref SurlClickLogsTable
+      Events:
+        RedirectApi:
+          Type: Api
+          Properties:
+            Path: /{shortCode}
+            Method: get
+      Policies:
+        - DynamoDBReadPolicy: { TableName: !Ref SurlMappingTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref SurlClickLogsTable }
+
+  TrendFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: trend.app.handler
+      Environment:
+        Variables:
+          LOG_TABLE_NAME: !Ref SurlClickLogsTable
+      Events:
+        TrendApi:
+          Type: Api
+          Properties:
+            Path: /trend
+            Method: get
+      Policies:
+        - DynamoDBReadPolicy: { TableName: !Ref SurlClickLogsTable }
+        - Statement:
+            - Effect: Allow
+              Action: "bedrock:InvokeModel"
+              Resource: "arn:aws:bedrock:ap-northeast-2::foundation-model/anthropic.claude-3-haiku-20240307-v1:0"
+
+  # [3] CloudWatch Alarms
+  HighErrorRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: Surl-High-Error-Rate
+      AlarmDescription: "1분 내 에러 3회 이상 발생 시 알람"
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 3
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  # [4] CloudWatch Advanced Dashboard
+  SurlOperationDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: Surl-Integrated-Management-Dashboard
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "alarm", "x": 0, "y": 0, "width": 24, "height": 3,
+              "properties": {
+                "title": "Emergency Alarms",
+                "alarms": ["arn:aws:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:Surl-High-Error-Rate"]
+              }
+            },
+            {
+              "type": "metric", "x": 0, "y": 3, "width": 8, "height": 6,
+              "properties": {
+                "title": "Traffic Gauge (Daily Cumulative)",
+                "metrics": [
+                  [ "AWS/Lambda", "Invocations", "FunctionName", "${RedirectFunction}", { "label": "Redirect", "color": "#ff7f0e", "stat": "Sum" } ],
+                  [ "...", "Invocations", "FunctionName", "${CreateFunction}", { "label": "Create", "color": "#1f77b4", "stat": "Sum" } ]
+                ],
+                "view": "gauge",
+                "region": "${AWS::Region}",
+                "stat": "Sum",
+                "period": 60,
+                "start": "-P1D",
+                "yAxis": { "left": { "min": 0, "max": 100 } }
+              }
+            },
+            {
+              "type": "log", "x": 8, "y": 3, "width": 16, "height": 6,
+              "properties": {
+                "title": "AI Trend Analysis",
+                "region": "${AWS::Region}",
+                "query": "SOURCE '/aws/lambda/${TrendFunction}' | filter @message like /REPORT_DATA:/ | parse @message \"REPORT_DATA: [분야] * [사유] * [요약] *\" as popular, reason, summary | display @timestamp, popular, reason, summary | sort @timestamp desc | limit 5",
+                "view": "table"
+              }
+            },
+            {
+              "type": "metric", "x": 0, "y": 9, "width": 12, "height": 6,
+              "properties": {
+                "title": "Latency p90",
+                "metrics": [
+                  [ "AWS/Lambda", "Duration", "FunctionName", "${TrendFunction}", { "stat": "p90" } ]
+                ],
+                "view": "timeSeries", "region": "${AWS::Region}"
+              }
+            },
+            {
+              "type": "metric", "x": 12, "y": 9, "width": 12, "height": 6,
+              "properties": {
+                "title": "DB Usage",
+                "metrics": [
+                  [ "AWS/DynamoDB", "ConsumedReadCapacityUnits", "TableName", "${SurlClickLogsTable}" ]
+                ],
+                "view": "timeSeries", "region": "${AWS::Region}"
+              }
+            }
+          ]
+        }
+
+Outputs:
+  ApiEndpoint:
+    Description: "API 주소"
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"

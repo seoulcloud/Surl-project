@@ -1,0 +1,173 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: "Surl - AI \uBD84\uC11D \uBC0F \uAC8C\uC774\uC9C0 \uB300\uC2DC\uBCF4\uB4DC\
+  \ \uD1B5\uD569 \uC2DC\uC2A4\uD15C"
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 20
+    MemorySize: 256
+Resources:
+  SurlCounterTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      TableName: SurlCounter
+      PrimaryKey:
+        Name: counter_name
+        Type: String
+  SurlMappingTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      PrimaryKey:
+        Name: shortCode
+        Type: String
+  SurlClickLogsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: shortCode
+        AttributeType: S
+      - AttributeName: timestamp
+        AttributeType: S
+      KeySchema:
+      - AttributeName: shortCode
+        KeyType: HASH
+      - AttributeName: timestamp
+        KeyType: RANGE
+  CreateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: CreateFunction
+      Handler: create.app.handler
+      Environment:
+        Variables:
+          MAPPING_TABLE_NAME:
+            Ref: SurlMappingTable
+          COUNTER_TABLE_NAME:
+            Ref: SurlCounterTable
+      Events:
+        CreateApi:
+          Type: Api
+          Properties:
+            Path: /create
+            Method: post
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: SurlMappingTable
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: SurlCounterTable
+      - Statement:
+        - Effect: Allow
+          Action: bedrock:InvokeModel
+          Resource: arn:aws:bedrock:ap-northeast-2::foundation-model/anthropic.claude-3-haiku-20240307-v1:0
+    Metadata:
+      SamResourceId: CreateFunction
+  RedirectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: RedirectFunction
+      Handler: redirect.app.handler
+      Environment:
+        Variables:
+          MAPPING_TABLE_NAME:
+            Ref: SurlMappingTable
+          LOG_TABLE_NAME:
+            Ref: SurlClickLogsTable
+      Events:
+        RedirectApi:
+          Type: Api
+          Properties:
+            Path: /{shortCode}
+            Method: get
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: SurlMappingTable
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: SurlClickLogsTable
+    Metadata:
+      SamResourceId: RedirectFunction
+  TrendFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: TrendFunction
+      Handler: trend.app.handler
+      Environment:
+        Variables:
+          LOG_TABLE_NAME:
+            Ref: SurlClickLogsTable
+      Events:
+        TrendApi:
+          Type: Api
+          Properties:
+            Path: /trend
+            Method: get
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: SurlClickLogsTable
+      - Statement:
+        - Effect: Allow
+          Action: bedrock:InvokeModel
+          Resource: arn:aws:bedrock:ap-northeast-2::foundation-model/anthropic.claude-3-haiku-20240307-v1:0
+    Metadata:
+      SamResourceId: TrendFunction
+  HighErrorRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: Surl-High-Error-Rate
+      AlarmDescription: "1\uBD84 \uB0B4 \uC5D0\uB7EC 3\uD68C \uC774\uC0C1 \uBC1C\uC0DD\
+        \ \uC2DC \uC54C\uB78C"
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 3
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+  SurlOperationDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: Surl-Integrated-Management-Dashboard
+      DashboardBody:
+        Fn::Sub: "{\n  \"widgets\": [\n    {\n      \"type\": \"alarm\", \"x\": 0,\
+          \ \"y\": 0, \"width\": 24, \"height\": 3,\n      \"properties\": {\n   \
+          \     \"title\": \"Emergency Alarms\",\n        \"alarms\": [\"arn:aws:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:Surl-High-Error-Rate\"\
+          ]\n      }\n    },\n    {\n      \"type\": \"metric\", \"x\": 0, \"y\":\
+          \ 3, \"width\": 8, \"height\": 6,\n      \"properties\": {\n        \"title\"\
+          : \"Traffic Gauge (Daily Cumulative)\",\n        \"metrics\": [\n      \
+          \    [ \"AWS/Lambda\", \"Invocations\", \"FunctionName\", \"${RedirectFunction}\"\
+          , { \"label\": \"Redirect\", \"color\": \"#ff7f0e\", \"stat\": \"Sum\" }\
+          \ ],\n          [ \"...\", \"Invocations\", \"FunctionName\", \"${CreateFunction}\"\
+          , { \"label\": \"Create\", \"color\": \"#1f77b4\", \"stat\": \"Sum\" } ]\n\
+          \        ],\n        \"view\": \"gauge\",\n        \"region\": \"${AWS::Region}\"\
+          ,\n        \"stat\": \"Sum\",\n        \"period\": 60,\n        \"start\"\
+          : \"-P1D\",\n        \"yAxis\": { \"left\": { \"min\": 0, \"max\": 100 }\
+          \ }\n      }\n    },\n    {\n      \"type\": \"log\", \"x\": 8, \"y\": 3,\
+          \ \"width\": 16, \"height\": 6,\n      \"properties\": {\n        \"title\"\
+          : \"AI Trend Analysis\",\n        \"region\": \"${AWS::Region}\",\n    \
+          \    \"query\": \"SOURCE '/aws/lambda/${TrendFunction}' | filter @message\
+          \ like /REPORT_DATA:/ | parse @message \\\"REPORT_DATA: [\uBD84\uC57C] *\
+          \ [\uC0AC\uC720] * [\uC694\uC57D] *\\\" as popular, reason, summary | display\
+          \ @timestamp, popular, reason, summary | sort @timestamp desc | limit 5\"\
+          ,\n        \"view\": \"table\"\n      }\n    },\n    {\n      \"type\":\
+          \ \"metric\", \"x\": 0, \"y\": 9, \"width\": 12, \"height\": 6,\n      \"\
+          properties\": {\n        \"title\": \"Latency p90\",\n        \"metrics\"\
+          : [\n          [ \"AWS/Lambda\", \"Duration\", \"FunctionName\", \"${TrendFunction}\"\
+          , { \"stat\": \"p90\" } ]\n        ],\n        \"view\": \"timeSeries\"\
+          , \"region\": \"${AWS::Region}\"\n      }\n    },\n    {\n      \"type\"\
+          : \"metric\", \"x\": 12, \"y\": 9, \"width\": 12, \"height\": 6,\n     \
+          \ \"properties\": {\n        \"title\": \"DB Usage\",\n        \"metrics\"\
+          : [\n          [ \"AWS/DynamoDB\", \"ConsumedReadCapacityUnits\", \"TableName\"\
+          , \"${SurlClickLogsTable}\" ]\n        ],\n        \"view\": \"timeSeries\"\
+          , \"region\": \"${AWS::Region}\"\n      }\n    }\n  ]\n}\n"
+Outputs:
+  ApiEndpoint:
+    Description: "API \uC8FC\uC18C"
+    Value:
+      Fn::Sub: https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/

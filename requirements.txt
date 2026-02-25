@@ -1,0 +1,2 @@
+# Surl-project 공통 의존성
+boto3>=1.34.0
