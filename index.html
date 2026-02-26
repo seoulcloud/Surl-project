@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Surl Project - Test Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;600;700&display=swap');
+        body { font-family: 'Pretendard', sans-serif; background-color: #f8fafc; }
+        .glass { background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.3); }
+        .terminal { background-color: #1e293b; color: #38bdf8; font-family: 'Courier New', Courier, monospace; }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <div class="max-w-5xl mx-auto">
+        <!-- Header -->
+        <header class="flex justify-between items-center mb-8">
+            <div>
+                <h1 class="text-3xl font-bold text-slate-900">Project Surl <span class="text-blue-600">Test Ops</span></h1>
+                <p class="text-slate-500">API 연동 실시간 시연 및 테스트 도구</p>
+            </div>
+            <div class="flex items-center gap-2 px-4 py-2 bg-blue-50 border border-blue-100 rounded-full">
+                <span class="relative flex h-3 w-3">
+                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                    <span class="relative inline-flex rounded-full h-3 w-3 bg-blue-500"></span>
+                </span>
+                <span class="text-sm font-medium text-blue-700">System Live</span>
+            </div>
+        </header>
+
+        <!-- API Config -->
+        <div class="mb-6 glass p-4 rounded-xl shadow-sm">
+            <label class="block text-sm font-semibold text-slate-700 mb-2">API Gateway Endpoint</label>
+            <div class="flex gap-2">
+                <input type="text" id="apiUrl" placeholder="https://xxxxxx.execute-api.ap-northeast-2.amazonaws.com/prod" 
+                       class="flex-1 px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition-all">
+                <button onclick="saveEndpoint()" class="px-4 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition-all">연결 저장</button>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <!-- Left Column: Controls -->
+            <div class="space-y-6">
+                <!-- 1. Create Surl -->
+                <section class="glass p-6 rounded-2xl shadow-sm">
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold">1</div>
+                        <h2 class="text-xl font-bold">단축 URL 생성 (POST)</h2>
+                    </div>
+                    <div class="space-y-3">
+                        <input type="text" id="longUrl" placeholder="긴 URL을 입력하세요 (예: https://google.com)" 
+                               class="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none">
+                        <button onclick="createSurl()" class="w-full py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transform active:scale-95 transition-all">
+                            Shorten URL 생성
+                        </button>
+                    </div>
+                    <div id="createResult" class="mt-4 hidden animate-fade-in">
+                        <div class="p-4 bg-blue-50 border border-blue-100 rounded-xl">
+                            <p class="text-sm text-blue-600 mb-1 font-semibold">생성된 단축 URL:</p>
+                            <div class="flex items-center justify-between">
+                                <span id="shortUrlText" class="text-lg font-bold text-slate-800 tracking-tight"></span>
+                                <button onclick="copyToClipboard()" class="text-blue-600 hover:text-blue-800"><i class="fa-regular fa-copy"></i></button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 2. Test Redirect -->
+                <section class="glass p-6 rounded-2xl shadow-sm">
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="w-8 h-8 bg-emerald-600 text-white rounded-full flex items-center justify-center font-bold">2</div>
+                        <h2 class="text-xl font-bold">리다이렉트 테스트 (GET)</h2>
+                    </div>
+                    <p class="text-sm text-slate-500 mb-3">단축 코드를 입력하고 이동을 확인합니다.</p>
+                    <div class="flex gap-2">
+                        <input type="text" id="shortCodeInput" placeholder="단축 코드 (예: aB2)" 
+                               class="flex-1 px-4 py-3 border border-slate-200 rounded-xl outline-none">
+                        <button onclick="testRedirect()" class="px-6 py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 transition-all">
+                            이동하기
+                        </button>
+                    </div>
+                </section>
+
+                <!-- 3. AI Analysis Trigger -->
+                <section class="glass p-6 rounded-2xl shadow-sm">
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="w-8 h-8 bg-purple-600 text-white rounded-full flex items-center justify-center font-bold">3</div>
+                        <h2 class="text-xl font-bold">AI 트렌드 분석 (Bedrock)</h2>
+                    </div>
+                    <button onclick="fetchTrend()" class="w-full py-3 bg-purple-600 text-white font-bold rounded-xl hover:bg-purple-700 shadow-lg shadow-purple-200 transition-all">
+                        실시간 AI 분석 결과 가져오기
+                    </button>
+                </section>
+            </div>
+
+            <!-- Right Column: Response Console -->
+            <div class="flex flex-col h-full">
+                <div class="flex items-center justify-between mb-2">
+                    <h3 class="font-bold text-slate-700 uppercase tracking-wider text-sm"><i class="fa-solid fa-terminal mr-2"></i>Live Response Log</h3>
+                    <button onclick="clearLog()" class="text-xs text-slate-400 hover:text-slate-600">Clear</button>
+                </div>
+                <div id="logArea" class="terminal flex-1 rounded-2xl p-6 overflow-y-auto max-h-[600px] text-sm leading-relaxed shadow-inner">
+                    <div class="opacity-50 italic">// API 호출 로그가 여기에 표시됩니다...</div>
+                </div>
+
+                <!-- AI Analysis Card Result -->
+                <div id="aiAnalysisResult" class="mt-6 hidden">
+                    <div class="bg-gradient-to-br from-indigo-600 to-purple-700 rounded-2xl p-6 text-white shadow-xl">
+                        <div class="flex items-center gap-2 mb-4">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i>
+                            <h3 class="font-bold">Bedrock AI Insight</h3>
+                        </div>
+                        <div id="aiContent" class="space-y-4">
+                            <!-- AI Result will be injected here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // API 상태 관리
+        let API_BASE_URL = localStorage.getItem('surl_endpoint') || '';
+        document.getElementById('apiUrl').value = API_BASE_URL;
+
+        function saveEndpoint() {
+            API_BASE_URL = document.getElementById('apiUrl').value.trim().replace(/\/$/, "");
+            localStorage.setItem('surl_endpoint', API_BASE_URL);
+            addLog(`System`, `API Endpoint saved: ${API_BASE_URL}`);
+        }
+
+        function addLog(type, message) {
+            const logArea = document.getElementById('logArea');
+            const time = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.className = 'mb-2';
+            
+            let color = 'text-blue-400';
+            if (type === 'ERROR') color = 'text-red-400';
+            if (type === 'SUCCESS') color = 'text-emerald-400';
+
+            logEntry.innerHTML = `<span class="opacity-50">[${time}]</span> <span class="${color} font-bold">${type}</span>: <span>${typeof message === 'object' ? JSON.stringify(message) : message}</span>`;
+            logArea.prepend(logEntry);
+        }
+
+        function clearLog() {
+            document.getElementById('logArea').innerHTML = '<div class="opacity-50 italic">// Logs cleared.</div>';
+        }
+
+        async function createSurl() {
+            const longUrl = document.getElementById('longUrl').value;
+            if (!longUrl) return alert("URL을 입력해주세요.");
+            if (!API_BASE_URL) return alert("API Endpoint를 먼저 설정하세요.");
+
+            addLog('POST', `Requesting short URL for: ${longUrl}`);
+            
+            try {
+                // 람다 코드(src/create/app.py)의 body.get("url")에 맞춰 키값을 수정함
+                const response = await fetch(`${API_BASE_URL}/create`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: longUrl })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                addLog('SUCCESS', data);
+
+                if (data.shortUrl) {
+                    const resultDiv = document.getElementById('createResult');
+                    const urlText = document.getElementById('shortUrlText');
+                    resultDiv.classList.remove('hidden');
+                    urlText.innerText = data.shortUrl;
+                    
+                    // 단축 코드 자동 입력
+                    document.getElementById('shortCodeInput').value = data.shortCode;
+                }
+            } catch (error) {
+                addLog('ERROR', error.message + " (CORS 설정이나 Endpoint 주소를 확인하세요)");
+            }
+        }
+
+        function testRedirect() {
+            const code = document.getElementById('shortCodeInput').value;
+            if (!code) return alert("코드를 입력하세요.");
+            
+            const fullRedirectUrl = `${API_BASE_URL}/${code}`;
+            addLog('GET', `Redirecting to: ${fullRedirectUrl}`);
+            
+            window.open(fullRedirectUrl, '_blank');
+        }
+
+        async function fetchTrend() {
+            if (!API_BASE_URL) return alert("API Endpoint를 먼저 설정하세요.");
+            addLog('GET', `Fetching AI Trends from Bedrock...`);
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/trend`);
+                const data = await response.json();
+                addLog('SUCCESS', data);
+
+                const aiBox = document.getElementById('aiAnalysisResult');
+                const aiContent = document.getElementById('aiContent');
+                aiBox.classList.remove('hidden');
+
+                // src/trend/app.py의 응답 형식인 ai_analysis 필드 파싱
+                const analysis = data.ai_analysis || "";
+                const category = analysis.match(/\[분야\] (.*?) \[/)?.[1] || "분석중";
+                const reason = analysis.match(/\[사유\] (.*?) \[/)?.[1] || "데이터 수집중";
+                const summary = analysis.match(/\[요약\] (.*)$/)?.[1] || "잠시 후 다시 시도해주세요.";
+
+                aiContent.innerHTML = `
+                    <div class="bg-white/10 p-4 rounded-xl border border-white/10">
+                        <div class="text-xs uppercase opacity-70 mb-1 font-bold text-blue-300">인기 카테고리</div>
+                        <div class="text-xl font-bold">${category}</div>
+                    </div>
+                    <div class="bg-white/10 p-4 rounded-xl border border-white/10">
+                        <div class="text-xs uppercase opacity-70 mb-1 font-bold text-purple-300">분석 사유</div>
+                        <p class="text-sm">${reason}</p>
+                    </div>
+                    <div class="bg-white/10 p-4 rounded-xl border border-white/10">
+                        <div class="text-xs uppercase opacity-70 mb-1 font-bold text-emerald-300">트렌드 요약</div>
+                        <p class="text-sm leading-relaxed">${summary}</p>
+                    </div>
+                `;
+            } catch (error) {
+                addLog('ERROR', error.message);
+            }
+        }
+
+        function copyToClipboard() {
+            const text = document.getElementById('shortUrlText').innerText;
+            const tempInput = document.createElement("input");
+            tempInput.value = text;
+            document.body.appendChild(tempInput);
+            tempInput.select();
+            document.execCommand("copy");
+            document.body.removeChild(tempInput);
+            alert("단축 URL이 복사되었습니다.");
+        }
+    </script>
+</body>
+</html>
